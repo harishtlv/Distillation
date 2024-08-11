@@ -1,0 +1,66 @@
+import pytest
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
+from distillation_model import StudentModel, DistillationModel
+from anomalib.models import Patchcore
+
+@pytest.fixture
+def dummy_data():
+    # Create some dummy data for testing
+    images = torch.randn(8, 3, 224, 224)
+    labels = torch.randint(0, 2, (8,))
+    dataset = TensorDataset(images, labels)
+    dataloader = DataLoader(dataset, batch_size=4)
+    return dataloader
+
+@pytest.fixture
+def teacher_model():
+    # Initialize a teacher model (Patchcore)
+    model = Patchcore(
+        backbone="wide_resnet50_2",
+        layers=["layer2", "layer3"],
+        pre_trained=False,  # False for testing
+        coreset_sampling_ratio=0.1,
+        num_neighbors=9,
+    )
+    model.eval()
+    return model
+
+@pytest.fixture
+def student_model():
+    # Initialize the student model
+    output_dim = 1536  # Same as the output dimension used in main code
+    return StudentModel(output_dim)
+
+@pytest.fixture
+def distillation_model(teacher_model, student_model):
+    # Initialize the distillation model
+    return DistillationModel(teacher_model, student_model)
+
+def test_student_model_output_shape(student_model):
+    # Test if the student model's output shape is correct
+    dummy_input = torch.randn(1, 3, 224, 224)
+    output = student_model(dummy_input)
+    assert output.shape == (1, 1536)
+
+def test_distillation_model_forward(distillation_model):
+    # Test if the distillation model's forward pass works
+    dummy_input = torch.randn(4, 3, 224, 224)
+    output = distillation_model(dummy_input)
+    assert output.shape == (4, 1536)
+
+def test_training_step(distillation_model, dummy_data):
+    # Test if the training step works and returns a loss
+    batch = next(iter(dummy_data))
+    loss = distillation_model.training_step(batch, 0)
+    assert loss is not None
+    assert isinstance(loss, torch.Tensor)
+
+def test_configure_optimizers(distillation_model):
+    # Test if the optimizer and scheduler are configured correctly
+    optimizers, schedulers = distillation_model.configure_optimizers()
+    assert len(optimizers) == 1
+    assert isinstance(optimizers[0], torch.optim.Adam)
+    assert len(schedulers) == 1
+    assert isinstance(schedulers[0], torch.optim.lr_scheduler.StepLR)
